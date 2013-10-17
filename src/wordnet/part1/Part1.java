@@ -2,8 +2,10 @@ package wordnet.part1;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import edu.mit.jwi.item.IIndexWord;
 import edu.mit.jwi.item.ISynset;
@@ -16,98 +18,86 @@ import wordnet.Pair;
 import wordnet.WordNet;
 
 public class Part1 {
-
+	/*
+	 * Give a detailed account of similarities and differences among the
+	 * following set of lexemes: imitation, synthetic, artificial, fake, simulated
+	 */
 	private final WordNet wordnet;
+	private final Map<ISynsetID, List<Pair<IWord, Integer>>> synsets;
+	private final Set<String> results;
 
 	public Part1(String path) {
 		wordnet = new WordNet(path);
+		results = new HashSet<String>();
+		synsets = new HashMap<ISynsetID, List<Pair<IWord, Integer>>>();
 	}
 
 	public void run(String[] args) {
-		List<Map<IWord, List<ISynset>>> semanticRelations = new ArrayList<Map<IWord, List<ISynset>>>();
 
 		for (String word : args) {
-			semanticRelations.add(getHypernyms(word));
-		}
-
-		for (Map<IWord, List<ISynset>> relation : semanticRelations) {
-			for (IWord word : relation.keySet()) {
-				for (Map<IWord, List<ISynset>> otherRelation : semanticRelations) {
-					if (relation == otherRelation)
-						continue;
-					Pair<IWord, Double> similarity = getPathSimilarity(
-							word, otherRelation);
-					if (similarity.getLeft() == null)
-						continue;
-
-					System.out.printf("Similarity between %s and %s is %f",
-							word.getLemma(), similarity.getLeft().getLemma(), similarity.getRight());
-					System.out.println();
-				}
+			for (POS pos : POS.values()) {
+				expandHypernyms(word, pos);
 			}
 		}
-	}
-
-	private Pair<IWord, Double> getPathSimilarity(IWord word,
-			Map<IWord, List<ISynset>> other) {
-
-		int shortestPath = 1000;
-		IWord matchWord = null;
-
-		for (Map.Entry<IWord, List<ISynset>> pair : other.entrySet()) {
-			int path = 0;
-			for (ISynset current : pair.getValue()) {
-				String sid1 = word.getSynset().getID().toString();
-				String sid2 = current.getID().toString();
-				if (sid1.equals(sid2) && path <= shortestPath) {
-					shortestPath = path;
-					matchWord = pair.getKey();
-					break;
-				}
-			}
+		
+		for (String result : results) {
+			System.out.println(result);
 		}
 
-		return new Pair<IWord, Double>(matchWord,
-				(double) (1 / (shortestPath + 1)));
 	}
 
-	private void expandHypernyms(ISynset current, List<ISynset> synsets) {
+	private void reportMatch(IWord word, int level,
+			List<Pair<IWord, Integer>> hyponyms) {
+		Pair<IWord, Integer> closest = null;
+
+		for (Pair<IWord, Integer> related : hyponyms) {
+			if (closest == null
+					|| (level - related.getRight()) < closest.getRight())
+				closest = new Pair<IWord, Integer>(related.getLeft(), level
+						- related.getRight());
+		}
+
+		results.add(String.format(
+				"The word: %s [%s] is close to the word: %s [%s]",
+				word.getLemma(), word.getPOS(), closest.getLeft().getLemma(),
+				closest.getLeft().getPOS()));
+	}
+
+	private void expandHypernyms(ISynset current, IWord word, int level) {
+
 		if (current == null)
 			return;
-		else if (!synsets.contains(current))
-			synsets.add(current);
+		else if (synsets.containsKey(current.getID())) {
+			reportMatch(word, level, synsets.get(current.getID()));
 
-		if (current.getPOS().equals(POS.ADJECTIVE)) {
-			for (ISynsetID sid : current.getRelatedSynsets(Pointer.DERIVATIONALLY_RELATED)) {
-				expandHypernyms(wordnet.get().getSynset(sid), synsets);
-			}
+			synsets.get(current.getID()).add(
+					new Pair<IWord, Integer>(word, level));
 		} else {
-			for (ISynsetID sid : current.getRelatedSynsets(Pointer.HYPERNYM)) {
-				expandHypernyms(wordnet.get().getSynset(sid), synsets);
-			}
+			List<Pair<IWord, Integer>> pairs = new ArrayList<Pair<IWord, Integer>>();
+			pairs.add(new Pair<IWord, Integer>(word, level));
+			synsets.put(current.getID(), pairs);
+		}
+
+		Pointer pointer = null;
+		if (current.getPOS().equals(POS.ADJECTIVE)) {
+			pointer = Pointer.DERIVATIONALLY_RELATED;
+		} else {
+			pointer = Pointer.HYPERNYM;
+		}
+
+		for (ISynsetID sid : current.getRelatedSynsets(pointer)) {
+			expandHypernyms(wordnet.get().getSynset(sid), word, level + 1);
 		}
 	}
 
-	private void expandHypernyms(Map<IWord, List<ISynset>> map,
-			String searchWord, POS pos) {
+	private void expandHypernyms(String searchWord, POS pos) {
 		IIndexWord idxWord = wordnet.get().getIndexWord(searchWord, pos);
 		if (idxWord == null)
 			return;
 
 		for (IWordID wordId : idxWord.getWordIDs()) {
 			IWord word = wordnet.get().getWord(wordId);
-			List<ISynset> synsets = new ArrayList<ISynset>();
-			expandHypernyms(word.getSynset(), synsets);
-			map.put(word, synsets);
+			expandHypernyms(word.getSynset(), word, 0);
 		}
-	}
-
-	private Map<IWord, List<ISynset>> getHypernyms(String searchWord) {
-		Map<IWord, List<ISynset>> map = new HashMap<IWord, List<ISynset>>();
-
-		for (POS pos : POS.values()) {
-			expandHypernyms(map, searchWord, pos);
-		}
-		return map;
 	}
 }
